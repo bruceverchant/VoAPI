@@ -9,14 +9,25 @@ services:
       MYSQL_USER: voapi
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
-      - mysql_data:/var/lib/mysql
+      - type: volume
+        source: mysql_data
+        target: /var/lib/mysql
     configs:
       - source: init_sql
         target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
 
   voapi:
     image: voapi/voapi:latest
@@ -24,14 +35,17 @@ services:
     ports:
       - "6800:6800"
     depends_on:
-      - mysql
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     configs:
-      - source: app_cfg
+      - source: app_config
         target: /config.yml
 
 volumes:
   mysql_data:
+    driver: local
 
 configs:
   init_sql:
@@ -41,7 +55,7 @@ configs:
       GRANT ALL PRIVILEGES ON `voapi-log`.* TO 'voapi'@'%';
       GRANT ALL PRIVILEGES ON `voapi-body-log`.* TO 'voapi'@'%';
 
-  app_cfg:
+  app_config:
     content: |
       app:
         port: 6800
