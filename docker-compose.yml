@@ -1,80 +1,57 @@
 
 services:
-  redis-voapi:
-    image: redis:latest
-    restart: always
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
-  db-voapi:
+  mysql:
     image: mysql:8.0.43
-    restart: always
-    volumes:
-      - voapi-mysql-data:/var/lib/mysql
-    configs:
-      - source: db-init
-        target: /docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
     environment:
-      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_USER: voapi
-      MYSQL_PASSWORD: ${VOAPI_DB_PASSWORD}
       MYSQL_DATABASE: voapi
-    command: --max_connections=5000 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
-
-  voapi-app:
-    image: voapi/voapi:latest
-    restart: always
-    depends_on:
-      db-voapi:
-        condition: service_healthy
-      redis-voapi:
-        condition: service_healthy
-    configs:
-      - source: voapi-config
-        target: /config.yml
+      MYSQL_USER: voapi
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
-      - voapi-files:/file
-      - voapi-public:/public
+      - mysql_data:/var/lib/mysql
+    configs:
+      - source: init_sql
+        target: /docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  voapi:
+    image: voapi/voapi:latest
+    restart: unless-stopped
     ports:
       - "6800:6800"
+    depends_on:
+      - mysql
+      - redis
+    configs:
+      - source: app_cfg
+        target: /config.yml
 
 volumes:
-  voapi-mysql-data:
-  voapi-files:
-  voapi-public:
+  mysql_data:
 
 configs:
-  db-init:
+  init_sql:
     content: |
-      CREATE DATABASE IF NOT EXISTS `voapi-log`
-        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-      CREATE DATABASE IF NOT EXISTS `voapi-body-log`
-        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      CREATE DATABASE IF NOT EXISTS `voapi-log`;
+      CREATE DATABASE IF NOT EXISTS `voapi-body-log`;
       GRANT ALL PRIVILEGES ON `voapi-log`.* TO 'voapi'@'%';
       GRANT ALL PRIVILEGES ON `voapi-body-log`.* TO 'voapi'@'%';
 
-  voapi-config:
+  app_cfg:
     content: |
       app:
         port: 6800
       mysql:
-        dsn: voapi:${VOAPI_DB_PASSWORD}@tcp(db-voapi:3306)/voapi
-        log-dsn: voapi:${VOAPI_DB_PASSWORD}@tcp(db-voapi:3306)/voapi-log
-        log-body-dsn: voapi:${VOAPI_DB_PASSWORD}@tcp(db-voapi:3306)/voapi-body-log
+        dsn: voapi:${MYSQL_PASSWORD}@tcp(mysql:3306)/voapi
+        log-dsn: voapi:${MYSQL_PASSWORD}@tcp(mysql:3306)/voapi-log
+        log-body-dsn: voapi:${MYSQL_PASSWORD}@tcp(mysql:3306)/voapi-body-log
         log-sharding:
           enable: false
           mode: y
       redis:
-        dsn: redis://redis-voapi:6379/0
+        dsn: redis://redis:6379/0
         pool-size: 0
